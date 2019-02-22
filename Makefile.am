@@ -554,6 +554,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/sysclk-lwla/protocol.c \
 	src/hardware/sysclk-lwla/api.c
 endif
+if HW_TEKTRONIX_TDS220
+src_libdrivers_la_SOURCES += \
+	src/hardware/tektronix-tds220/protocol.h \
+	src/hardware/tektronix-tds220/protocol.c \
+	src/hardware/tektronix-tds220/api.c
+endif
 if HW_TELEINFO
 src_libdrivers_la_SOURCES += \
 	src/hardware/teleinfo/protocol.h \
