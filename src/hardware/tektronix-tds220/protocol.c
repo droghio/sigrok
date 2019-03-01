@@ -91,6 +91,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 	struct dev_context *devc;
 	struct sr_serial_dev_inst *serial;
 	gboolean stop = FALSE;
+        gboolean have_response = FALSE;
 	int len;
 
 	(void)fd;
@@ -114,6 +115,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 			*(devc->buf + devc->buflen) = '\0';
 			if (*(devc->buf + devc->buflen - 1) == '\n') {
 				/* End of line */
+                                have_response = TRUE;
 				stop = receive_line(sdi);
 				break;
 			}
@@ -122,19 +124,19 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 
 	if (sr_sw_limits_check(&devc->limits) || stop)
 		sr_dev_acquisition_stop(sdi);
-	else
+	else if (have_response)
 		tek_recv_curve(sdi);
 
 	return TRUE;
 }
 
-uint64_t tek_parse_curve(char data[], int8_t processed[], uint64_t max_length)
+uint64_t tek_parse_curve(char data[], float processed[], uint64_t max_length)
 {
         const uint8_t BASE_10 = 10;
         const char delim[] = ",";
         uint64_t i = 0;
         for (char* tmp = strtok(data, delim); tmp != NULL && i < max_length; tmp = strtok(NULL, delim),i++)
-              processed[i] = (int8_t) strtol(tmp, NULL, BASE_10);
+              processed[i] = (float) strtol(tmp, NULL, BASE_10);
         // Last hidden increment makes i the number of samples recorded.
         return i;
 }
@@ -151,7 +153,7 @@ SR_PRIV void tek_recv_curve(const struct sr_dev_inst *sdi)
 	struct sr_analog_meaning meaning;
 	struct sr_analog_spec spec;
 	struct sr_channel *prev_chan;
-	float fvalues[] = { 123.7, 234.8 };
+	float fvalues[SAMPLE_DEPTH];
 	const char *s;
 	char *mstr;
 	int i, exp;
@@ -159,6 +161,7 @@ SR_PRIV void tek_recv_curve(const struct sr_dev_inst *sdi)
 	devc = (struct dev_context *) sdi->priv;
 	i = devc->cur_channel->index;
 	sr_spew("Curve reply '%s'.", devc->buf);
+        tek_parse_curve((char *) devc->buf, fvalues, SAMPLE_DEPTH);
 
 	sr_analog_init(&analog, &encoding, &meaning, &spec,
 	               devc->cur_digits[i] - devc->cur_exponent[i]);
@@ -166,7 +169,7 @@ SR_PRIV void tek_recv_curve(const struct sr_dev_inst *sdi)
 	analog.meaning->unit = devc->cur_unit[i];
 	analog.meaning->mqflags = devc->cur_mqflags[i];
 	analog.meaning->channels = g_slist_append(NULL, devc->cur_channel);
-	analog.num_samples = 2;
+	analog.num_samples = SAMPLE_DEPTH;
 	analog.data = fvalues;
 	encoding.digits = devc->cur_encoding[i] - devc->cur_exponent[i];
 	packet.type = SR_DF_ANALOG;
