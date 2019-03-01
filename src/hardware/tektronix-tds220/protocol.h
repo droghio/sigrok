@@ -28,22 +28,35 @@
 #define LOG_PREFIX "tektronix-tds220"
 
 SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data);
+SR_PRIV int tek_configure_scope(const struct sr_dev_inst *sdi);
+SR_PRIV int tek_start_collection(const struct sr_dev_inst *sdi);
+SR_PRIV int tek_send(const struct sr_dev_inst *sdi, const char *cmd, ...);
+SR_PRIV void tek_recv_curve(const struct sr_dev_inst *sdi);
 
-#define MAX_CHANNELS 3
-#define AGDMM_BUFSIZE 256
+#define MAX_CHANNELS 4
+#define SAMPLE_DEPTH 2500
+// Three digits and 1 Comma for 2500 Samples
+#define TEK_BUFSIZE 16384 
+#define DIVS_PER_SCREEN 10
+
+// We can go to 19200 but it is too easy to overflow the input buffer.
+#define SERIALCOMM "9600/8n1"
 
 /* Always USB-serial, 1ms is plenty. */
 #define SERIAL_WRITE_TIMEOUT_MS 1
+#define SERIAL_READ_TIMEOUT_MS 500
 
 #define DEFAULT_DATA_SOURCE	DATA_SOURCE_LIVE
 
 enum {
 	DATA_SOURCE_LIVE,
-	DATA_SOURCE_LOG_HAND,
-	DATA_SOURCE_LOG_TRIG,
-	DATA_SOURCE_LOG_AUTO,
-	DATA_SOURCE_LOG_EXPO,
 };
+
+
+static double timebase_for_samplerate(uint64_t sample_rate)
+{
+        return (SAMPLE_DEPTH*DIVS_PER_SCREEN)/((double) sample_rate);
+}
 
 /* Supported models */
 enum {
@@ -58,9 +71,6 @@ struct agdmm_profile {
 	int model;
 	const char *modelname;
 	int nb_channels;
-	const struct agdmm_job *jobs_live;
-	const struct agdmm_job *jobs_log;
-	const struct agdmm_recv *recvs;
 };
 
 struct dev_context {
@@ -68,12 +78,7 @@ struct dev_context {
 	struct sr_sw_limits limits;
 	int data_source;
 
-	const struct agdmm_job *jobs;
-	int current_job;
-	gboolean job_running;
-	gboolean job_again;
-	int64_t jobs_start[8];
-	unsigned char buf[AGDMM_BUFSIZE];
+	unsigned char buf[TEK_BUFSIZE];
 	int buflen;
 	uint64_t cur_samplerate;
 	struct sr_channel *cur_channel;
@@ -85,32 +90,7 @@ struct dev_context {
 	int cur_digits[MAX_CHANNELS];
 	int cur_encoding[MAX_CHANNELS];
 	int cur_exponent[MAX_CHANNELS];
-	int mode_tempaux;
 	int mode_continuity;
-	int mode_squarewave;
-	int mode_dbm_dbv;
 };
-
-enum job_type {
-	JOB_AGAIN = 1,
-	JOB_STOP,
-	JOB_CONF,
-	JOB_STAT,
-	JOB_FETC,
-	JOB_LOG,
-};
-
-struct agdmm_job {
-	enum job_type type;
-	int interval;
-	int (*send) (const struct sr_dev_inst *sdi);
-};
-
-struct agdmm_recv {
-	const char *recv_regex;
-	int (*recv) (const struct sr_dev_inst *sdi, GMatchInfo *match);
-};
-
-SR_PRIV int agdmm_receive_data(int fd, int revents, void *cb_data);
 
 #endif

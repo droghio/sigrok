@@ -21,9 +21,6 @@
 #include <string.h>
 #include "protocol.h"
 
-#define SAMPLE_DEPTH 2500
-#define DIVS_PER_SCREEN 10
-
 static const uint32_t scanopts[] = {
 	SR_CONF_CONN,
 	SR_CONF_SERIALCOMM,
@@ -65,60 +62,18 @@ static const uint64_t samplerates[] = {
 	SR_MHZ(250),
 };
 
-static double timebase_for_samplerate(uint64_t sample_rate)
-{
-        return (SAMPLE_DEPTH*DIVS_PER_SCREEN)/((double) sample_rate);
-}
-
-// // Time bases in order corresponding to above sample rates.
-// static const float time_bases[] = {
-//         5.0,
-//         2.5,
-//         1.0,
-//         0.5,
-//         0.25,
-//         0.1,
-//         50e-3,
-//         25e-3,
-//         10e-3,
-//         5e-3,
-//         2.5e-3,
-//         1e-3,
-//         500e-6,
-//         250e-6,
-//         100e-6,
-//         50e-6,
-//         25e-6,
-//         10e-6,
-//         5e-6,
-//         2.5e-6,
-//         1e-6, 
-// };
-
 static const char *data_sources[] = {
 	"LIVE"
 };
 
-extern const struct agdmm_job agdmm_jobs_live[];
-extern const struct agdmm_job agdmm_jobs_log[];
-extern const struct agdmm_recv agdmm_recvs_u123x[];
-extern const struct agdmm_recv agdmm_recvs_u124x[];
-extern const struct agdmm_recv agdmm_recvs_u124xc[];
-extern const struct agdmm_recv agdmm_recvs_u125x[];
-extern const struct agdmm_recv agdmm_recvs_u128x[];
-
-// We can go to 19200 but it is too easy to overflow the input buffer.
-#define SERIALCOMM "9600/8n1"
-
 static const struct agdmm_profile supported_agdmm[] = {
-	{ TEK_TDS220, "TDS 220", 2, agdmm_jobs_live, NULL, agdmm_recvs_u123x },
-	{ TEK_TDS2000, "TDS 2000", 2, agdmm_jobs_live, NULL, agdmm_recvs_u123x },
+	{ TEK_TDS220, "TDS 220", 2 },
+	{ TEK_TDS2000, "TDS 2000", 4 },
 	ALL_ZERO
 };
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
-        printf("I'm alive!");
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
 	struct sr_config *src;
@@ -152,24 +107,30 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		return NULL;
 
 	serial_flush(serial);
+        serial_drain(serial);
+
+	len = 128;
+	buf = (char *) g_malloc(len);
+
+        // Clear out old messages if any are present.
+        while (serial_read_blocking(serial, buf, len, SERIAL_READ_TIMEOUT_MS));
 	if (serial_write_blocking(serial, "*IDN?\r\n", 7, SERIAL_WRITE_TIMEOUT_MS) < 7) {
 		sr_err("Unable to send identification string.");
 		return NULL;
 	}
 
-	len = 128;
-	buf = (char *) g_malloc(len);
 	serial_readline(serial, &buf, &len, 250);
 	if (!len)
 		return NULL;
 
+        sr_spew("Scanning for scopes.");
 	tokens = g_strsplit(buf, ",", 4);
-        printf("Doing a thing: %s", tokens[0]);
 	if (!strcmp("TEKTRONIX", tokens[0])
 			&& tokens[1] && tokens[2] && tokens[3]) {
 		for (i = 0; supported_agdmm[i].model; i++) {
 			if (strcmp(supported_agdmm[i].modelname, tokens[1]))
 				continue;
+                        sr_spew("Scope found '%s'.", buf);
 			sdi = (struct sr_dev_inst *) g_malloc0(sizeof(struct sr_dev_inst));
 			sdi->status = SR_ST_INACTIVE;
 			sdi->vendor = g_strdup(tokens[0]);
@@ -211,60 +172,63 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	return std_scan_complete(di, devices);
 }
 
-static int dev_open(struct sr_dev_inst *sdi)
-{
-	(void)sdi;
-
-	/* TODO: get handle from sdi->conn and open it. */
-
-	return SR_OK;
-}
-
-static int dev_close(struct sr_dev_inst *sdi)
-{
-	(void)sdi;
-
-	/* TODO: get handle from sdi->conn and close it. */
-
-	return SR_OK;
-}
-
 static int config_get(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
-	int ret;
+	struct dev_context *devc;
 
-	(void)sdi;
-	(void)data;
 	(void)cg;
 
-	ret = SR_OK;
+	devc = (struct dev_context *) sdi->priv;
+
 	switch (key) {
-	/* TODO */
+	case SR_CONF_SAMPLERATE:
+		*data = g_variant_new_uint64(devc->cur_samplerate);
+		break;
+	case SR_CONF_LIMIT_SAMPLES:
+	case SR_CONF_LIMIT_MSEC:
+		return sr_sw_limits_config_get(&devc->limits, key, data);
+	case SR_CONF_DATA_SOURCE:
+		*data = g_variant_new_string(data_sources[devc->data_source]);
+		break;
 	default:
 		return SR_ERR_NA;
 	}
 
-	return ret;
+	return SR_OK;
 }
 
 static int config_set(uint32_t key, GVariant *data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
-	int ret;
+	struct dev_context *devc;
+	uint64_t samplerate;
+	int idx;
 
-	(void)sdi;
-	(void)data;
 	(void)cg;
 
-	ret = SR_OK;
+	devc = (struct dev_context *) sdi->priv;
+
 	switch (key) {
-	/* TODO */
+	case SR_CONF_SAMPLERATE:
+		samplerate = g_variant_get_uint64(data);
+		if (samplerate < samplerates[0] || samplerate > samplerates[sizeof(samplerates)/sizeof(samplerates[0])-1])
+			return SR_ERR_ARG;
+		devc->cur_samplerate = g_variant_get_uint64(data);
+		break;
+	case SR_CONF_LIMIT_SAMPLES:
+	case SR_CONF_LIMIT_MSEC:
+		return sr_sw_limits_config_set(&devc->limits, key, data);
+	case SR_CONF_DATA_SOURCE:
+		if ((idx = std_str_idx(data, ARRAY_AND_SIZE(data_sources))) < 0)
+			return SR_ERR_ARG;
+		devc->data_source = idx;
+		break;
 	default:
-		ret = SR_ERR_NA;
+		return SR_ERR_NA;
 	}
 
-	return ret;
+	return SR_OK;
 }
 
 static int config_list(uint32_t key, GVariant **data,
@@ -290,20 +254,31 @@ static int config_list(uint32_t key, GVariant **data,
 
 static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 {
-	/* TODO: configure hardware, reset acquisition state, set up
-	 * callbacks and send header packet. */
+	struct dev_context *devc = (struct dev_context *) sdi->priv;
+	struct sr_serial_dev_inst *serial;
 
-	(void)sdi;
+	devc->cur_channel = sr_next_enabled_channel(sdi, NULL);
+	devc->cur_conf = sr_next_enabled_channel(sdi, NULL);
+	devc->cur_sample = 1;
+	devc->cur_mq[0] = -1;
+	if (devc->profile->nb_channels > 2)
+		devc->cur_mq[1] = -1;
 
-	return SR_OK;
-}
+	if (devc->data_source == DATA_SOURCE_LIVE) {
+	} else {
+		sr_err("Data source is not implemented for this model.");
+		return SR_ERR_NA;
+	}
 
-static int dev_acquisition_stop(struct sr_dev_inst *sdi)
-{
-	/* TODO: stop acquisition. */
+	sr_sw_limits_acquisition_start(&devc->limits);
+	std_session_send_df_header(sdi);
 
-	(void)sdi;
+	serial = (struct sr_serial_dev_inst *) sdi->conn;
+	serial_source_add(sdi->session, serial, G_IO_IN, 10,
+			tektronix_tds220_receive_data, (void *) sdi);
 
+        tek_configure_scope(sdi);
+        tek_start_collection(sdi);
 	return SR_OK;
 }
 
@@ -319,10 +294,10 @@ static struct sr_dev_driver tektronix_tds220_driver_info = {
 	.config_get = config_get,
 	.config_set = config_set,
 	.config_list = config_list,
-	.dev_open = dev_open,
-	.dev_close = dev_close,
+	.dev_open = std_serial_dev_open,
+	.dev_close = std_serial_dev_close,
 	.dev_acquisition_start = dev_acquisition_start,
-	.dev_acquisition_stop = dev_acquisition_stop,
+	.dev_acquisition_stop = std_serial_dev_acquisition_stop,
 	.context = NULL,
 };
 SR_REGISTER_DEV_DRIVER(tektronix_tds220_driver_info);
