@@ -55,7 +55,7 @@ enum {
 
 static double timebase_for_samplerate(uint64_t sample_rate)
 {
-        return (SAMPLE_DEPTH*DIVS_PER_SCREEN)/((double) sample_rate);
+        return SAMPLE_DEPTH/((double) sample_rate*DIVS_PER_SCREEN);
 }
 
 /* Supported models */
