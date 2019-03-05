@@ -29,24 +29,29 @@
 
 SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data);
 SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi);
+SR_PRIV void tektronix_tds220_prepare_next_channel(const struct sr_dev_inst *sdi);
+SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi);
 SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi);
 SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd, ...);
 SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi);
 SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length);
 
 
-#define TEK_BUFSIZE 16384                  // Three digits and 1 Comma for 2500 Samples
+#define TEK_BUFSIZE 16384	// Three digits and 1 Comma for 2500 Samples
 #define DEFAULT_DATA_SOURCE	DATA_SOURCE_LIVE
 #define MAX_CHANNELS 4
 #define SAMPLE_DEPTH 2500
 #define DIVS_PER_SCREEN 10
-#define DEFAULT_VOLTAGE_SCALE_FACTOR 12.8  // 256 bit depth / 10 DIVS / 2 V default scale
+#define DEFAULT_VOLTAGE_SCALE_FACTOR 12.8	// 256 bit depth / 10 DIVS / 2 V default scale
 
 #define SERIAL_WRITE_TIMEOUT_MS 1
 #define SERIAL_READ_TIMEOUT_MS 500
-#define SERIALCOMM "9600/8n1"              // We can go to 19200 but it is too easy to overflow
-                                           // scope's the input buffer.
+#define SERIALCOMM "9600/8n1"	// We can go to 19200 but it is too easy to overflow
+				// scope's the input buffer.
 
+#define ACQ_COMMAND			"ACQ:STATE RUN\n"
+#define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"\
+					"CURV?\n"
 
 static inline double timebase_for_samplerate(uint64_t sample_rate)
 {
@@ -90,7 +95,6 @@ struct dev_context {
 	int buflen;
 	uint64_t cur_samplerate;
 	struct sr_channel *cur_channel;
-	struct sr_channel *cur_conf;
 	int cur_sample;
 	enum sr_mq cur_mq[MAX_CHANNELS];
 	enum sr_unit cur_unit[MAX_CHANNELS];

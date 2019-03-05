@@ -281,19 +281,18 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 	tektronix_tds220_configure_scope(sdi);
 
-	devc->buflen = 0;
-	devc->cur_channel = sr_next_enabled_channel(sdi, NULL);
-	devc->cur_conf = sr_next_enabled_channel(sdi, NULL);
-	devc->cur_sample = 1;
-	for (int i = 0; i < devc->profile->nb_channels; i++)
-		devc->cur_mq[i] = SR_MQ_VOLTAGE;
 
 	if (devc->data_source != DATA_SOURCE_LIVE) {
 		sr_err("Data source is not implemented for this model.");
 		return SR_ERR_NA;
 	}
 
+	// Kick off the first channel here the tektronix_tds220_receive_data
+	// call will download the other channels.
+	devc->cur_channel = NULL;
+	tektronix_tds220_prepare_next_channel(sdi);
 	tektronix_tds220_start_collection(sdi);
+
 	return SR_OK;
 }
 

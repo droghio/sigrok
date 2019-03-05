@@ -76,13 +76,31 @@ SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 	return tektronix_tds220_send(sdi, setup_commands, timebase_for_samplerate(devc->cur_samplerate));
 }
 
+SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi)
+{
+	return tektronix_tds220_send(sdi, ACQ_COMMAND);
+}
+
 SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi)
 {
-	// TODO: Adapt per number of channels used by the device.
-	char collection_commands[] = "ACQ:STATE RUN\n"
-				     "DAT:SOU CH1\n"
-				     "CURV?\n";
-	return tektronix_tds220_send(sdi, collection_commands);
+	struct dev_context *devc;
+	
+	devc = (struct dev_context *) sdi->priv;
+	devc->limits.samples_read = 0;
+	// First channel on the scope is 1 not 0.
+	sr_spew("Beginning collection on channel %d of %d", devc->cur_channel->index+1, devc->profile->nb_channels);
+	return tektronix_tds220_send(sdi, CHANNEL_COLLECT_TEMPLATE, devc->cur_channel->index+1);
+}
+
+SR_PRIV void tektronix_tds220_prepare_next_channel(const struct sr_dev_inst *sdi)
+{
+	struct dev_context *devc;
+
+	devc = (struct dev_context *) sdi->priv;
+	devc->buflen = 0;
+	devc->cur_channel = sr_next_enabled_channel(sdi, devc->cur_channel);
+	devc->cur_mq[devc->cur_channel->index] = SR_MQ_VOLTAGE;
+	devc->cur_sample = 1;
 }
 
 SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
@@ -121,10 +139,19 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 		}
 	}
 
-	if (sr_sw_limits_check(&devc->limits) || stop)
-		sr_dev_acquisition_stop(sdi);
-	else if (have_response)
+	if (sr_sw_limits_check(&devc->limits) || stop){
+		if (devc->cur_channel->index < devc->profile->nb_channels-1){
+			// Chain download the next channel's data.
+			sr_spew("Chainning to next channel.");
+			tektronix_tds220_prepare_next_channel(sdi);
+			tektronix_tds220_start_collection(sdi);
+		} else {
+			sr_dev_acquisition_stop(sdi);
+		}
+	}
+	else if (have_response){
 		tektronix_tds220_recv_curve(sdi);
+	}
 
 	return TRUE;
 }
@@ -157,7 +184,7 @@ SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi)
 
 	devc = (struct dev_context *) sdi->priv;
 	i = devc->cur_channel->index;
-	sr_spew("Received samples for channel %d: '%s'.", devc->cur_channel->index, devc->buf);
+	sr_spew("Received samples for channel %d of %d: '%s'.", devc->cur_channel->index+1, devc->profile->nb_channels, devc->buf);
 	samples = tektronix_tds220_parse_curve((char *) devc->buf, fvalues, SAMPLE_DEPTH);
 	sr_spew("Received %d samples.", samples);
 	devc->buflen = 0;
