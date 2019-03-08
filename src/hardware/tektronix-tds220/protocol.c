@@ -63,17 +63,18 @@ SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd
 SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
+	gboolean return_value;
 	devc = (struct dev_context *) sdi->priv;
-	// TODO: Adapt per number of channels used by the device.
-	char setup_commands[] = "CH1:POS 0\n"
-				"CH2:POS 0\n"
-				"CH1:SCA 2\n"
-				"CH2:SCA 2\n"
-				"SEL:CH1 ON\n"
-				"SEL:CH2 ON\n"
-				"HOR:SCA %5.2e\n"
-				"ACQ:STOPA SEQ\n";
-	return tektronix_tds220_send(sdi, setup_commands, timebase_for_samplerate(devc->cur_samplerate));
+	const uint64_t *vscale_raw;
+	float vscale;
+
+	vscale_raw = volts_per_div[devc->cur_volts_per_div_index[0]];
+	vscale = vscale_raw[0]/((float) vscale_raw[1]);
+	return_value = TRUE;
+	for (int i = 1; i < devc->profile->nb_channels+1; i++)
+		return_value &= tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE, i, i, vscale,
+							i, timebase_for_samplerate(devc->cur_samplerate));
+	return SR_OK ? return_value : SR_ERR;
 }
 
 SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi)
@@ -156,13 +157,13 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 	return TRUE;
 }
 
-SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length)
+SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length, double voltage_scale)
 {
 	const uint8_t BASE_10 = 10;
 	const char delim[] = ",";
 	uint64_t i = 0;
 	for (char* tmp = strtok(data, delim); tmp != NULL && i < max_length; tmp = strtok(NULL, delim),i++)
-	      processed[i] = ((float) strtol(tmp, NULL, BASE_10))/DEFAULT_VOLTAGE_SCALE_FACTOR;
+	      processed[i] = ((float) strtol(tmp, NULL, BASE_10))/voltage_scale;
 	// Last hidden increment makes i the number of samples recorded.
 	return i;
 }
@@ -181,12 +182,17 @@ SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi)
 	float fvalues[SAMPLE_DEPTH];
 	int i;
 	int samples;
+	const uint64_t *vscale_raw;
+	float vscale;
 
 	devc = (struct dev_context *) sdi->priv;
 	i = devc->cur_channel->index;
+	vscale_raw = volts_per_div[devc->cur_volts_per_div_index[i]];
+	vscale = vscale_raw[0]/((float) vscale_raw[1]);
+
 	sr_spew("Received samples for channel %d of %d: '%s'.", devc->cur_channel->index+1, devc->profile->nb_channels, devc->buf);
-	samples = tektronix_tds220_parse_curve((char *) devc->buf, fvalues, SAMPLE_DEPTH);
-	sr_spew("Received %d samples.", samples);
+	samples = tektronix_tds220_parse_curve((char *) devc->buf, fvalues, SAMPLE_DEPTH, VOLTAGE_SCALE_FACTOR/vscale);
+	sr_spew("Received %d samples with a voltage scale of %f.", samples, vscale*VOLTAGE_SCALE_FACTOR);
 	devc->buflen = 0;
 
 	sr_analog_init(&analog, &encoding, &meaning, &spec,

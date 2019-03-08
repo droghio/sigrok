@@ -35,6 +35,8 @@ static const uint32_t drvopts[] = {
 
 static const uint32_t devopts[] = {
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	// TODO Make configurable per channel.
+	SR_CONF_VDIV | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST, 
 };
 
 static const uint64_t samplerates[] = {
@@ -181,6 +183,7 @@ static int config_get(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
+	const uint64_t* vscale;
 
 	(void)cg;
 
@@ -192,6 +195,11 @@ static int config_get(uint32_t key, GVariant **data,
 		break;
 	case SR_CONF_DATA_SOURCE:
 		*data = g_variant_new_string(data_sources[devc->data_source]);
+		break;
+	case SR_CONF_VDIV:
+		// TODO Make configurable per channel.
+		vscale = volts_per_div[devc->cur_volts_per_div_index[0]];
+		*data = g_variant_new("(tt)", vscale[0], vscale[1]);
 		break;
 	default:
 		return SR_ERR_NA;
@@ -223,6 +231,13 @@ static int config_set(uint32_t key, GVariant *data,
 			return SR_ERR_ARG;
 		devc->data_source = idx;
 		break;
+	case SR_CONF_VDIV:
+		// TODO Make configurable per channel.
+		if ((idx = std_u64_tuple_idx(data, ARRAY_AND_SIZE(volts_per_div))) < 0)
+			return SR_ERR_ARG;
+		for (int i = 0; i < devc->profile->nb_channels; i++)
+			devc->cur_volts_per_div_index[i] = idx;
+		break;
 	default:
 		return SR_ERR_NA;
 	}
@@ -247,6 +262,10 @@ static int config_list(uint32_t key, GVariant **data,
 	case SR_CONF_SAMPLERATE:
 		sr_spew("Configuring sample rates, found %lu values.", ARRAY_SIZE(samplerates));
 		*data = std_gvar_samplerates(ARRAY_AND_SIZE(samplerates));
+		break;
+	case SR_CONF_VDIV:
+		// TODO Make configurable per channel.
+		*data = std_gvar_tuple_array(ARRAY_AND_SIZE(volts_per_div));
 		break;
 	default:
 		sr_info("Get unknown configuration list request for key: %d", key);
@@ -291,6 +310,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	// call will download the other channels.
 	devc->cur_channel = NULL;
 	tektronix_tds220_prepare_next_channel(sdi);
+	tektronix_tds220_start_acquisition(sdi);
 	tektronix_tds220_start_collection(sdi);
 
 	return SR_OK;

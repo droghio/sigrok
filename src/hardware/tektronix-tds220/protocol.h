@@ -34,29 +34,54 @@ SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi);
 SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi);
 SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd, ...);
 SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi);
-SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length);
+SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length, double voltage_scale);
 
 
 #define TEK_BUFSIZE 16384	// Three digits and 1 Comma for 2500 Samples
 #define DEFAULT_DATA_SOURCE	DATA_SOURCE_LIVE
-#define MAX_CHANNELS 4
-#define SAMPLE_DEPTH 2500
-#define DIVS_PER_SCREEN 10
-#define DEFAULT_VOLTAGE_SCALE_FACTOR 12.8	// 256 bit depth / 10 DIVS / 2 V default scale
+#define MAX_CHANNELS	4
+#define SAMPLE_DEPTH	2500
+#define DIVS_PER_SCREEN	10
+#define MAX_SAMPLE_VALUE	256
+#define VOLTAGE_SCALE_FACTOR	(MAX_SAMPLE_VALUE/DIVS_PER_SCREEN)
 
-#define SERIAL_WRITE_TIMEOUT_MS 1
-#define SERIAL_READ_TIMEOUT_MS 500
-#define SERIALCOMM "9600/8n1"	// We can go to 19200 but it is too easy to overflow
-				// scope's the input buffer.
+#define SERIAL_WRITE_TIMEOUT_MS	1
+#define SERIAL_READ_TIMEOUT_MS	500
+#define SERIALCOMM	"9600/8n1"	// We can go to 19200 but it is too easy to overflow
+					// scope's the input buffer.
 
 #define ACQ_COMMAND			"ACQ:STATE RUN\n"
-#define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"\
+
+#define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"	\
 					"CURV?\n"
+
+#define CHANNEL_CONFIGURE_TEMPLATE	"CH%d:POS 0\n"		\
+					"CH%d:SCA %3.1e\n"		\
+					"SEL:CH%d ON\n"		\
+					"HOR:SCA %5.2e\n"	\
+					"ACQ:STOPA SEQ\n"
 
 static inline double timebase_for_samplerate(uint64_t sample_rate)
 {
 	return SAMPLE_DEPTH/((double) sample_rate*DIVS_PER_SCREEN);
 }
+
+static const uint64_t volts_per_div[][2] = {
+	{ 2, 1 },
+	/* millivolts */
+	{ 10, 1000 },
+	{ 20, 1000 },
+	{ 50, 1000 },
+	{ 100, 1000 },
+	{ 200, 1000 },
+	{ 500, 1000 },
+	/* volts */
+	{ 1, 1 },
+	{ 5, 1 },
+	{ 10, 1 },
+	{ 20, 1 },
+	{ 50, 1 },
+};
 
 /* Data sources */
 enum {
@@ -102,6 +127,7 @@ struct dev_context {
 	int cur_digits[MAX_CHANNELS];
 	int cur_encoding[MAX_CHANNELS];
 	int cur_exponent[MAX_CHANNELS];
+	int cur_volts_per_div_index[MAX_CHANNELS];
 };
 
 #endif
