@@ -25,8 +25,9 @@
 #include <libsigrok/libsigrok.h>
 #include "libsigrok-internal.h"
 
-#define LOG_PREFIX "tektronix-tds220"
-
+//
+// Function signatures
+//
 SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data);
 SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi);
 SR_PRIV void tektronix_tds220_prepare_next_channel(const struct sr_dev_inst *sdi);
@@ -37,37 +38,61 @@ SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi);
 SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length, double voltage_scale);
 
 
-#define TEK_BUFSIZE 16384	// Three digits and 1 Comma for 2500 Samples
+//
+// Driver defines
+//
+#define LOG_PREFIX "tektronix-tds220"
+#define BASE_10	10
+
 #define DEFAULT_DATA_SOURCE	DATA_SOURCE_LIVE
+#define DEFAULT_VDIV_INDEX	7
+#define DEFAULT_SAMPLERATE	13
+
+//
+// Scope parameters
+//
 #define MAX_CHANNELS	4
+#define MAX_SAMPLE_VALUE	256
 #define SAMPLE_DEPTH	2500
 #define DIVS_PER_SCREEN	10
-#define MAX_SAMPLE_VALUE	256
 #define VOLTAGE_SCALE_FACTOR	(MAX_SAMPLE_VALUE/DIVS_PER_SCREEN)
 
+//
+// Communication defines
+//
+#define TEK_BUFSIZE	16384	// Three digits and 1 Comma for 2500 Samples
 #define SERIAL_WRITE_TIMEOUT_MS	1
 #define SERIAL_READ_TIMEOUT_MS	500
 #define SERIALCOMM	"9600/8n1"	// We can go to 19200 but it is too easy to overflow
 					// scope's the input buffer.
 
-#define ACQ_COMMAND			"ACQ:STATE RUN\n"
+//
+// Command templates
+//
+#define ACQ_COMMAND			"ACQ:STATE RUN\n"	\
+					"ACQ:STOPA SEQ\n"
 
 #define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"	\
 					"CURV?\n"
 
 #define CHANNEL_CONFIGURE_TEMPLATE	"CH%d:POS 0\n"		\
-					"CH%d:SCA %3.1e\n"		\
+					"CH%d:SCA %3.1e\n"	\
 					"SEL:CH%d ON\n"		\
-					"HOR:SCA %5.2e\n"	\
-					"ACQ:STOPA SEQ\n"
+					"HOR:SCA %5.2e\n"
 
+//
+// Utility functions
+//
 static inline double timebase_for_samplerate(uint64_t sample_rate)
 {
 	return SAMPLE_DEPTH/((double) sample_rate*DIVS_PER_SCREEN);
 }
 
+
+//
+// Data types and enumerations
+//
 static const uint64_t volts_per_div[][2] = {
-	{ 2, 1 },
 	/* millivolts */
 	{ 10, 1000 },
 	{ 20, 1000 },
@@ -77,18 +102,19 @@ static const uint64_t volts_per_div[][2] = {
 	{ 500, 1000 },
 	/* volts */
 	{ 1, 1 },
+	{ 2, 1 },
 	{ 5, 1 },
 	{ 10, 1 },
 	{ 20, 1 },
 	{ 50, 1 },
 };
 
-/* Data sources */
+// Data sources
 enum {
 	DATA_SOURCE_LIVE,
 };
 
-/* Supported models */
+// Supported models
 enum {
 	TEK_TDS210 = 10000, 
 	TEK_TDS220, 
@@ -104,13 +130,14 @@ enum {
 	TEK_TDS2024
 };
 
-/* Supported device profiles */
+// Supported device profiles
 struct tektronix_tds220_profile {
 	int model;
 	const char *modelname;
 	int nb_channels;
 };
 
+// Driver runtime profile
 struct dev_context {
 	const struct tektronix_tds220_profile *profile;
 	struct sr_sw_limits limits;

@@ -71,6 +71,7 @@ SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 	vscale_raw = volts_per_div[devc->cur_volts_per_div_index[0]];
 	vscale = vscale_raw[0]/((float) vscale_raw[1]);
 	return_value = TRUE;
+	// First channel on the scope is 1 not 0.
 	for (int i = 1; i < devc->profile->nb_channels+1; i++)
 		return_value &= tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE, i, i, vscale,
 							i, timebase_for_samplerate(devc->cur_samplerate));
@@ -124,7 +125,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 	serial = (struct sr_serial_dev_inst *) sdi->conn;
 	if (revents == G_IO_IN) {
 		sr_spew("Receiving data.");
-		/* Serial data arrived. */
+		// Serial data arrived.
 		while (TEK_BUFSIZE - devc->buflen - 1 > 0) {
 			len = serial_read_nonblocking(serial, devc->buf + devc->buflen, 8);
 			sr_spew("Received bytes: %d", len);
@@ -159,7 +160,6 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 
 SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], uint64_t max_length, double voltage_scale)
 {
-	const uint8_t BASE_10 = 10;
 	const char delim[] = ",";
 	uint64_t i = 0;
 	for (char* tmp = strtok(data, delim); tmp != NULL && i < max_length; tmp = strtok(NULL, delim),i++)
@@ -196,7 +196,7 @@ SR_PRIV void tektronix_tds220_recv_curve(const struct sr_dev_inst *sdi)
 	devc->buflen = 0;
 
 	sr_analog_init(&analog, &encoding, &meaning, &spec,
-		       devc->cur_digits[i] - devc->cur_exponent[i]);
+			devc->cur_digits[i] - devc->cur_exponent[i]);
 	analog.meaning->mq = devc->cur_mq[i];
 	analog.meaning->unit = devc->cur_unit[i];
 	analog.meaning->mqflags = devc->cur_mqflags[i];

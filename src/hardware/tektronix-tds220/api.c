@@ -21,22 +21,22 @@
 #include <string.h>
 #include "protocol.h"
 
-#define DEFAULT_SAMPLERATE 12
-
 static const uint32_t scanopts[] = {
 	SR_CONF_CONN,
 	SR_CONF_SERIALCOMM,
-	SR_CONF_NUM_ANALOG_CHANNELS,
+	SR_CONF_NUM_ANALOG_CHANNELS
 };
 
 static const uint32_t drvopts[] = {
-	SR_CONF_OSCILLOSCOPE,
+	SR_CONF_OSCILLOSCOPE
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
-	// TODO Make configurable per channel.
-	SR_CONF_VDIV | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST, 
+	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST
+};
+
+static const uint32_t devopts_cg[] = {
+	SR_CONF_VDIV | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST
 };
 
 static const uint64_t samplerates[] = {
@@ -60,7 +60,7 @@ static const uint64_t samplerates[] = {
 	SR_MHZ(25),
 	SR_MHZ(50),
 	SR_MHZ(100),
-	SR_MHZ(250),
+	SR_MHZ(250)
 };
 
 static const char *data_sources[] = {
@@ -86,6 +86,13 @@ static const struct tektronix_tds220_profile supported_teks[] = {
 	ALL_ZERO
 };
 
+static const char *channel_names[] = {
+	"CH1",
+	"CH2",
+	"CH3",
+	"CH4"
+};
+
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
 	struct sr_dev_inst *sdi;
@@ -93,9 +100,11 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	struct sr_config *src;
 	struct sr_serial_dev_inst *serial;
 	GSList *l, *devices;
-	int len, i;
+	int len, i, j;
 	const char *conn, *serialcomm;
 	char *buf, **tokens;
+	struct sr_channel *ch;
+	struct sr_channel_group *cg;
 
 	devices = NULL;
 	conn = serialcomm = NULL;
@@ -158,13 +167,14 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 			sdi->inst_type = SR_INST_SERIAL;
 			sdi->conn = serial;
 			sdi->priv = devc;
-			sr_channel_new(sdi, 0, SR_CHANNEL_ANALOG, TRUE, "CH1");
-			if (supported_teks[i].nb_channels > 1)
-				sr_channel_new(sdi, 1, SR_CHANNEL_ANALOG, TRUE, "CH2");
-			if (supported_teks[i].nb_channels > 2)
-				sr_channel_new(sdi, 2, SR_CHANNEL_ANALOG, TRUE, "CH3");
-			if (supported_teks[i].nb_channels > 3)
-				sr_channel_new(sdi, 3, SR_CHANNEL_ANALOG, TRUE, "CH4");
+			for (j = 0; j < supported_teks[i].nb_channels; j++){ 
+				ch = sr_channel_new(sdi, j, SR_CHANNEL_ANALOG, TRUE, channel_names[j]);
+				cg = (struct sr_channel_group*) g_malloc0(sizeof(struct sr_channel_group));
+				cg->name = g_strdup(channel_names[i]);
+				cg->channels = g_slist_append(cg->channels, ch);
+				sdi->channel_groups = g_slist_append(sdi->channel_groups, cg);
+				devc->cur_volts_per_div_index[j] = DEFAULT_VDIV_INDEX;
+			}
 			devices = g_slist_append(devices, sdi);
 			break;
 		}
@@ -184,25 +194,34 @@ static int config_get(uint32_t key, GVariant **data,
 {
 	struct dev_context *devc;
 	const uint64_t* vscale;
+	const struct sr_channel *channel;
 
 	(void)cg;
 
 	devc = (struct dev_context *) sdi->priv;
 
-	switch (key) {
-	case SR_CONF_SAMPLERATE:
-		*data = g_variant_new_uint64(devc->cur_samplerate);
-		break;
-	case SR_CONF_DATA_SOURCE:
-		*data = g_variant_new_string(data_sources[devc->data_source]);
-		break;
-	case SR_CONF_VDIV:
-		// TODO Make configurable per channel.
-		vscale = volts_per_div[devc->cur_volts_per_div_index[0]];
-		*data = g_variant_new("(tt)", vscale[0], vscale[1]);
-		break;
-	default:
-		return SR_ERR_NA;
+	if (!cg){
+		switch (key) {
+		case SR_CONF_SAMPLERATE:
+			*data = g_variant_new_uint64(devc->cur_samplerate);
+			break;
+		case SR_CONF_DATA_SOURCE:
+			*data = g_variant_new_string(data_sources[devc->data_source]);
+			break;
+		default:
+			return SR_ERR_NA;
+		}
+	} else {
+		switch (key) {
+		case SR_CONF_VDIV:
+			channel = (struct sr_channel*) cg->channels->data;
+			vscale = volts_per_div[devc->cur_volts_per_div_index[channel->index]];
+			*data = g_variant_new("(tt)", vscale[0], vscale[1]);
+			sr_spew("Responding with vdiv for channel: %d %lu", ((struct sr_channel*) cg->channels->data)->index, vscale[0]);
+			break;
+		default:
+			return SR_ERR_NA;
+		}
 	}
 
 	return SR_OK;
@@ -219,27 +238,32 @@ static int config_set(uint32_t key, GVariant *data,
 
 	devc = (struct dev_context *) sdi->priv;
 
-	switch (key) {
-	case SR_CONF_SAMPLERATE:
-		samplerate = g_variant_get_uint64(data);
-		if (samplerate < samplerates[0] || samplerate > samplerates[ARRAY_SIZE(samplerates)-2])
-			return SR_ERR_ARG;
-		devc->cur_samplerate = samplerate;
-		break;
-	case SR_CONF_DATA_SOURCE:
-		if ((idx = std_str_idx(data, ARRAY_AND_SIZE(data_sources))) < 0)
-			return SR_ERR_ARG;
-		devc->data_source = idx;
-		break;
-	case SR_CONF_VDIV:
-		// TODO Make configurable per channel.
-		if ((idx = std_u64_tuple_idx(data, ARRAY_AND_SIZE(volts_per_div))) < 0)
-			return SR_ERR_ARG;
-		for (int i = 0; i < devc->profile->nb_channels; i++)
-			devc->cur_volts_per_div_index[i] = idx;
-		break;
-	default:
-		return SR_ERR_NA;
+	if (!cg){
+		switch (key) {
+		case SR_CONF_SAMPLERATE:
+			samplerate = g_variant_get_uint64(data);
+			if (samplerate < samplerates[0] || samplerate > samplerates[ARRAY_SIZE(samplerates)-1])
+				return SR_ERR_ARG;
+			devc->cur_samplerate = samplerate;
+			break;
+		case SR_CONF_DATA_SOURCE:
+			if ((idx = std_str_idx(data, ARRAY_AND_SIZE(data_sources))) < 0)
+				return SR_ERR_ARG;
+			devc->data_source = idx;
+			break;
+		default:
+			return SR_ERR_NA;
+		}
+	} else {
+		switch (key) {
+		case SR_CONF_VDIV:
+			if ((idx = std_u64_tuple_idx(data, ARRAY_AND_SIZE(volts_per_div))) < 0)
+				return SR_ERR_ARG;
+			devc->cur_volts_per_div_index[((struct sr_channel*) cg->channels->data)->index] = idx;
+			break;
+		default:
+			return SR_ERR_NA;
+		}
 	}
 
 	return SR_OK;
@@ -248,31 +272,37 @@ static int config_set(uint32_t key, GVariant *data,
 static int config_list(uint32_t key, GVariant **data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
-	int ret;
-
 	(void)sdi;
 	(void)data;
-	(void)cg;
 
-	ret = SR_OK;
-	switch (key) {
-	case SR_CONF_SCAN_OPTIONS:
-	case SR_CONF_DEVICE_OPTIONS:
-		return STD_CONFIG_LIST(key, data, sdi, cg, scanopts, drvopts, devopts);
-	case SR_CONF_SAMPLERATE:
-		sr_spew("Configuring sample rates, found %lu values.", ARRAY_SIZE(samplerates));
-		*data = std_gvar_samplerates(ARRAY_AND_SIZE(samplerates));
-		break;
-	case SR_CONF_VDIV:
-		// TODO Make configurable per channel.
-		*data = std_gvar_tuple_array(ARRAY_AND_SIZE(volts_per_div));
-		break;
-	default:
-		sr_info("Get unknown configuration list request for key: %d", key);
-		return SR_ERR_NA;
+	if (!cg) {
+		switch (key) {
+		case SR_CONF_SCAN_OPTIONS:
+		case SR_CONF_DEVICE_OPTIONS:
+			return STD_CONFIG_LIST(key, data, sdi, cg, scanopts, drvopts, devopts);
+		case SR_CONF_SAMPLERATE:
+			sr_spew("Configuring sample rates, found %lu values.", ARRAY_SIZE(samplerates));
+			*data = std_gvar_samplerates(ARRAY_AND_SIZE(samplerates));
+			break;
+		default:
+			sr_info("Get unknown configuration list request for key: %d", key);
+			return SR_ERR_NA;
+		}
+	} else {
+		switch (key) {
+		case SR_CONF_DEVICE_OPTIONS:
+			*data = std_gvar_array_u32(ARRAY_AND_SIZE(devopts_cg));
+			break;
+		case SR_CONF_VDIV:
+			*data = std_gvar_tuple_array(ARRAY_AND_SIZE(volts_per_div));
+			break;
+		default:
+			sr_info("Get unknown channel group configuration list request for key: %d", key);
+			return SR_ERR_NA;
+		}
 	}
 
-	return ret;
+	return SR_OK;
 }
 
 
@@ -342,7 +372,7 @@ static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 	}
 
 	return std_session_send_df_end(sdi);
-  }
+}
 
 
 static struct sr_dev_driver tektronix_tds220_driver_info = {
