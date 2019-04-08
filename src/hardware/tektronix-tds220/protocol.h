@@ -47,6 +47,7 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 #define DEFAULT_DATA_SOURCE	DATA_SOURCE_LIVE
 #define DEFAULT_VDIV_INDEX	7
 #define DEFAULT_SAMPLERATE	13
+#define DEFAULT_FRAMES	1
 
 //
 // Scope parameters
@@ -116,9 +117,9 @@ enum {
 
 // Supported models
 enum {
-	TEK_TDS210 = 10000, 
-	TEK_TDS220, 
-	TEK_TDS224, 
+	TEK_TDS210 = 10000,
+	TEK_TDS220,
+	TEK_TDS224,
 	TEK_TDS1002,
 	TEK_TDS1012,
 	TEK_TDS2001,

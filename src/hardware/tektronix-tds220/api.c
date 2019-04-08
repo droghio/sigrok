@@ -32,7 +32,9 @@ static const uint32_t drvopts[] = {
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST
+	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_LIMIT_FRAMES | SR_CONF_SET | SR_CONF_GET,
+	SR_CONF_LIMIT_SAMPLES | SR_CONF_SET | SR_CONF_GET
 };
 
 static const uint32_t devopts_cg[] = {
@@ -167,7 +169,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 			sdi->inst_type = SR_INST_SERIAL;
 			sdi->conn = serial;
 			sdi->priv = devc;
-			for (j = 0; j < supported_teks[i].nb_channels; j++){ 
+			for (j = 0; j < supported_teks[i].nb_channels; j++){
 				ch = sr_channel_new(sdi, j, SR_CHANNEL_ANALOG, TRUE, channel_names[j]);
 				cg = (struct sr_channel_group*) g_malloc0(sizeof(struct sr_channel_group));
 				cg->name = g_strdup(channel_names[i]);
@@ -202,6 +204,12 @@ static int config_get(uint32_t key, GVariant **data,
 
 	if (!cg){
 		switch (key) {
+		case SR_CONF_LIMIT_FRAMES:
+			*data = g_variant_new_uint64(DEFAULT_FRAMES);
+			break;
+		case SR_CONF_LIMIT_SAMPLES:
+			*data = g_variant_new_uint64(SAMPLE_DEPTH);
+			break;
 		case SR_CONF_SAMPLERATE:
 			*data = g_variant_new_uint64(devc->cur_samplerate);
 			break;
@@ -232,6 +240,7 @@ static int config_set(uint32_t key, GVariant *data,
 {
 	struct dev_context *devc;
 	uint64_t samplerate;
+	uint64_t limit;
 	int idx;
 
 	(void)cg;
@@ -240,6 +249,20 @@ static int config_set(uint32_t key, GVariant *data,
 
 	if (!cg){
 		switch (key) {
+		case SR_CONF_LIMIT_FRAMES:
+			limit = g_variant_get_uint64(data);
+			if (limit != DEFAULT_FRAMES){
+				sr_err("Driver can only record %d frame(s) per run.", DEFAULT_FRAMES);
+				return SR_ERR_ARG;
+			}
+			break;
+		case SR_CONF_LIMIT_SAMPLES:
+			limit = g_variant_get_uint64(data);
+			if (limit != SAMPLE_DEPTH){
+				sr_err("Driver can only record %d sample(s) per run.", SAMPLE_DEPTH);
+				return SR_ERR_ARG;
+			}
+			break;
 		case SR_CONF_SAMPLERATE:
 			samplerate = g_variant_get_uint64(data);
 			if (samplerate < samplerates[0] || samplerate > samplerates[ARRAY_SIZE(samplerates)-1])
@@ -318,7 +341,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	std_session_send_df_header(sdi);
 
 	serial = (struct sr_serial_dev_inst *) sdi->conn;
-	serial_source_add(sdi->session, serial, G_IO_IN, 10,
+	serial_source_add(sdi->session, serial, G_IO_IN, SERIAL_READ_TIMEOUT_MS,
 			tektronix_tds220_receive_data, (void *) sdi);
 
 
@@ -365,7 +388,7 @@ static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 	while (serial_read_blocking(serial, buf, sizeof(buf), SERIAL_READ_TIMEOUT_MS));
 
 	prefix = sdi->driver->name;
-	
+
 	if ((ret = serial_source_remove(sdi->session, serial)) < 0) {
 		sr_err("%s: Failed to remove source: %d.", prefix, ret);
 		return ret;

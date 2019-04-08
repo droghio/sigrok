@@ -86,7 +86,7 @@ SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi)
 SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	
+
 	devc = (struct dev_context *) sdi->priv;
 	devc->limits.samples_read = 0;
 	// First channel on the scope is 1 not 0.
@@ -163,7 +163,7 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 	const char delim[] = ",";
 	uint64_t i = 0;
 	for (char* tmp = strtok(data, delim); tmp != NULL && i < max_length; tmp = strtok(NULL, delim),i++)
-	      processed[i] = ((float) strtol(tmp, NULL, BASE_10))/voltage_scale;
+		processed[i] = ((float) strtol(tmp, NULL, BASE_10))/voltage_scale;
 	// Last hidden increment makes i the number of samples recorded.
 	return i;
 }
