@@ -19,6 +19,7 @@
 
 #include <config.h>
 #include "protocol.h"
+#include "scpi.h"
 
 static gboolean receive_curve_packet(const struct sr_dev_inst *sdi)
 {
@@ -41,18 +42,18 @@ static gboolean receive_curve_packet(const struct sr_dev_inst *sdi)
 
 SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd, ...)
 {
-	struct sr_serial_dev_inst *serial;
+	struct sr_scpi_dev_inst *scpi;
 	va_list args;
 	char buf[256];
 
-	serial = (struct sr_serial_dev_inst *) sdi->conn;
+	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
 
 	va_start(args, cmd);
 	vsnprintf(buf, sizeof(buf) - 3, cmd, args);
 	va_end(args);
 	sr_spew("Sending '%s'.", buf);
 	strcat(buf, "\n");
-	if (serial_write_blocking(serial, buf, strlen(buf), SERIAL_WRITE_TIMEOUT_MS) < (int)strlen(buf)) {
+	if (sr_scpi_send(scpi, buf) != SR_OK) {
 		sr_err("Failed to send.");
 		return SR_ERR;
 	}
@@ -109,7 +110,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 {
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
-	struct sr_serial_dev_inst *serial;
+	struct sr_scpi_dev_inst *scpi;
 	gboolean stop = FALSE;
 	gboolean have_response = FALSE;
 	int len;
@@ -122,12 +123,12 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 	if (!(devc = (struct dev_context *) sdi->priv))
 		return TRUE;
 
-	serial = (struct sr_serial_dev_inst *) sdi->conn;
+	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
 	if (revents == G_IO_IN) {
 		sr_spew("Receiving data.");
 		// Serial data arrived.
 		while (TEK_BUFSIZE - devc->buflen - 1 > 0) {
-			len = serial_read_nonblocking(serial, devc->buf + devc->buflen, 8);
+			len = sr_scpi_read_data(scpi, ((char *) devc->buf + devc->buflen), 8);
 			sr_spew("Received bytes: %d", len);
 			if (len < 1)
 				break;
@@ -144,7 +145,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 	if (sr_sw_limits_check(&devc->limits) || stop){
 		if (devc->cur_channel->index < devc->profile->nb_channels-1){
 			// Chain download the next channel's data.
-			sr_spew("Chainning to next channel.");
+			sr_spew("Chaining to next channel.");
 			tektronix_tds220_prepare_next_channel(sdi);
 			tektronix_tds220_start_collection(sdi);
 		} else {

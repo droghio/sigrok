@@ -20,6 +20,7 @@
 #include <config.h>
 #include <string.h>
 #include "protocol.h"
+#include "scpi.h"
 
 static const uint32_t scanopts[] = {
 	SR_CONF_CONN,
@@ -95,60 +96,36 @@ static const char *channel_names[] = {
 	"CH4"
 };
 
-static GSList *scan(struct sr_dev_driver *di, GSList *options)
+static struct sr_dev_driver tektronix_tds220_driver_info;
+
+static struct sr_dev_inst *probe_device(struct sr_scpi_dev_inst *scpi)
 {
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
-	struct sr_config *src;
-	struct sr_serial_dev_inst *serial;
-	GSList *l, *devices;
 	int len, i, j;
-	const char *conn, *serialcomm;
 	char *buf, **tokens;
 	struct sr_channel *ch;
 	struct sr_channel_group *cg;
 
-	devices = NULL;
-	conn = serialcomm = NULL;
-	for (l = options; l; l = l->next) {
-		src = ((struct sr_config *) l->data);
-		switch (src->key) {
-		case SR_CONF_CONN:
-			conn = g_variant_get_string(src->data, NULL);
-			break;
-		case SR_CONF_SERIALCOMM:
-			serialcomm = g_variant_get_string(src->data, NULL);
-			break;
-		}
-	}
-	if (!conn)
+	sr_spew("Probing scope...");
+	if (sr_scpi_open(scpi) != SR_OK)
 		return NULL;
-	if (!serialcomm)
-		serialcomm = SERIALCOMM;
-
-	serial = sr_serial_dev_inst_new(conn, serialcomm);
-
-	if (serial_open(serial, SERIAL_RDWR) != SR_OK)
-		return NULL;
-
-	serial_flush(serial);
-	serial_drain(serial);
 
 	len = 128;
 	buf = (char *) g_malloc(len);
 
-	// Clear out old messages if any are present.
-	while (serial_read_blocking(serial, buf, len, SERIAL_READ_TIMEOUT_MS));
-	if (serial_write_blocking(serial, "*IDN?\r\n", 7, SERIAL_WRITE_TIMEOUT_MS) < 7) {
+	if (sr_scpi_get_string(scpi, "*IDN?\r\n", &buf) == SR_ERR) {
 		sr_err("Unable to send identification string.");
 		return NULL;
 	}
 
-	serial_readline(serial, &buf, &len, 250);
-	if (!len)
+	len = strlen(buf);
+	if (len == 0)
+	{
+		sr_err("Unable to get identification string. Recieved %d bytes in buffer: %s", len, buf);
 		return NULL;
+	}
 
-	sr_spew("Scanning for scopes.");
 	tokens = g_strsplit(buf, ",", 4);
 	if (!strcmp("TEKTRONIX", tokens[0])
 			&& tokens[1] && tokens[2] && tokens[3]) {
@@ -161,13 +138,14 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 			sdi->vendor = g_strdup(tokens[0]);
 			sdi->model = g_strdup(tokens[1]);
 			sdi->version = g_strdup(tokens[3]);
+			sdi->driver = &tektronix_tds220_driver_info;
 			devc = (struct dev_context *) g_malloc0(sizeof(struct dev_context));
 			sr_sw_limits_init(&devc->limits);
 			devc->profile = &supported_teks[i];
 			devc->data_source = DEFAULT_DATA_SOURCE;
 			devc->cur_samplerate = samplerates[DEFAULT_SAMPLERATE];
-			sdi->inst_type = SR_INST_SERIAL;
-			sdi->conn = serial;
+			sdi->inst_type = SR_INST_SCPI;
+			sdi->conn = scpi;
 			sdi->priv = devc;
 			for (j = 0; j < supported_teks[i].nb_channels; j++){
 				ch = sr_channel_new(sdi, j, SR_CHANNEL_ANALOG, TRUE, channel_names[j]);
@@ -177,18 +155,18 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				sdi->channel_groups = g_slist_append(sdi->channel_groups, cg);
 				devc->cur_volts_per_div_index[j] = DEFAULT_VDIV_INDEX;
 			}
-			devices = g_slist_append(devices, sdi);
 			break;
 		}
 	}
 	g_strfreev(tokens);
 	g_free(buf);
 
-	serial_close(serial);
-	if (!devices)
-		sr_serial_dev_inst_free(serial);
+	return sdi;
+}
 
-	return std_scan_complete(di, devices);
+static GSList *scan(struct sr_dev_driver *di, GSList *options)
+{
+	return sr_scpi_scan(di->context, options, probe_device);
 }
 
 static int config_get(uint32_t key, GVariant **data,
@@ -332,24 +310,17 @@ static int config_list(uint32_t key, GVariant **data,
 static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	struct sr_serial_dev_inst *serial;
-	char buf[128];
+	struct sr_scpi_dev_inst *scpi;
 
 	devc = (struct dev_context *) sdi->priv;
 	devc->limits.limit_samples = SAMPLE_DEPTH;
 	sr_sw_limits_acquisition_start(&devc->limits);
 	std_session_send_df_header(sdi);
 
-	serial = (struct sr_serial_dev_inst *) sdi->conn;
-	serial_source_add(sdi->session, serial, G_IO_IN, SERIAL_READ_TIMEOUT_MS,
+	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
+	sr_scpi_source_add(sdi->session, scpi, G_IO_IN, SERIAL_READ_TIMEOUT_MS,
 			tektronix_tds220_receive_data, (void *) sdi);
 
-
-	// Clear out old messages if any are present.
-	serial = (struct sr_serial_dev_inst *) sdi->conn;
-	serial_flush(serial);
-	serial_drain(serial);
-	while (serial_read_blocking(serial, buf, sizeof(buf), SERIAL_READ_TIMEOUT_MS));
 
 	tektronix_tds220_configure_scope(sdi);
 
@@ -371,30 +342,36 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 {
-	struct sr_serial_dev_inst *serial;
-	const char *prefix;
+	 struct sr_scpi_dev_inst *scpi;
+
+	 std_session_send_df_end(sdi);
+	 scpi = (struct sr_scpi_dev_inst*) ((struct sr_dev_inst*) sdi)->conn;
+	 sr_scpi_source_remove(sdi->session, scpi);
+	 return SR_OK;
+}
+
+static int dev_open(struct sr_dev_inst *sdi)
+{
 	int ret;
-	char buf[128];
+	struct sr_scpi_dev_inst *scpi = sdi->conn;
 
-	if (!sdi) {
-		sr_err("%s: Invalid argument.", __func__);
-		return SR_ERR_ARG;
+	if ((ret = sr_scpi_open(scpi)) < 0) {
+		sr_err("Failed to open SCPI device: %s.", sr_strerror(ret));
+		return SR_ERR;
 	}
 
-	// Clear out old messages if any are present.
-	serial = (struct sr_serial_dev_inst *) sdi->conn;
-	serial_flush(serial);
-	serial_drain(serial);
-	while (serial_read_blocking(serial, buf, sizeof(buf), SERIAL_READ_TIMEOUT_MS));
+	return SR_OK;
+}
 
-	prefix = sdi->driver->name;
+static int dev_close(struct sr_dev_inst *sdi)
+{
+	struct sr_scpi_dev_inst *scpi;
 
-	if ((ret = serial_source_remove(sdi->session, serial)) < 0) {
-		sr_err("%s: Failed to remove source: %d.", prefix, ret);
-		return ret;
-	}
+	scpi = sdi->conn;
+	if (!scpi)
+		return SR_ERR_BUG;
 
-	return std_session_send_df_end(sdi);
+	return sr_scpi_close(scpi);
 }
 
 
@@ -410,8 +387,8 @@ static struct sr_dev_driver tektronix_tds220_driver_info = {
 	.config_get = config_get,
 	.config_set = config_set,
 	.config_list = config_list,
-	.dev_open = std_serial_dev_open,
-	.dev_close = std_serial_dev_close,
+	.dev_open = dev_open,
+	.dev_close = dev_close,
 	.dev_acquisition_start = dev_acquisition_start,
 	.dev_acquisition_stop = dev_acquisition_stop,
 	.context = NULL,
