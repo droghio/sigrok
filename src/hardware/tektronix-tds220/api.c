@@ -304,6 +304,7 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
 	struct sr_scpi_dev_inst *scpi;
+	int ret;
 
 	devc = (struct dev_context *) sdi->priv;
 	devc->limits.limit_samples = SAMPLE_DEPTH;
@@ -311,12 +312,12 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	std_session_send_df_header(sdi);
 
 	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
-	sr_scpi_source_add(sdi->session, scpi, G_IO_IN, SERIAL_READ_TIMEOUT_MS,
+	sr_scpi_source_add(sdi->session, scpi, G_IO_IN, TIMEOUT_MS,
 			tektronix_tds220_receive_data, (void *) sdi);
 
 
-	tektronix_tds220_configure_scope(sdi);
-
+	ret = tektronix_tds220_configure_scope(sdi);
+	sr_info("config: %d", ret);
 
 	if (devc->data_source != DATA_SOURCE_LIVE) {
 		sr_err("Data source is not implemented for this model.");
@@ -326,11 +327,13 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 	// Kick off the first channel here the tektronix_tds220_receive_data
 	// call will download the other channels.
 	devc->cur_channel = NULL;
-	tektronix_tds220_prepare_next_channel(sdi);
-	tektronix_tds220_start_acquisition(sdi);
-	tektronix_tds220_start_collection(sdi);
 
-	return SR_OK;
+	tektronix_tds220_prepare_next_channel(sdi);
+	ret |= tektronix_tds220_start_acquisition(sdi);
+	sr_info("acq: %d", ret);
+	ret |= tektronix_tds220_start_collection(sdi);
+	sr_info("col: %d", ret);
+	return ret == SR_OK ? SR_OK : SR_ERR;
 }
 
 static int dev_acquisition_stop(struct sr_dev_inst *sdi)

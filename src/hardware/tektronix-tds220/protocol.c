@@ -45,8 +45,24 @@ SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd
 	struct sr_scpi_dev_inst *scpi;
 	va_list args;
 	char buf[256];
+	char *is_busy_resp;
+	gboolean is_busy;
 
 	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
+
+	is_busy = TRUE;
+	while (is_busy){
+		sr_spew("Checking if scope is busy...");
+		if (sr_scpi_get_string(scpi, BUSY_COMMAND, &is_busy_resp) == SR_OK){
+			is_busy = (is_busy_resp[0] == '1');
+			g_free((gpointer) is_busy_resp);
+		}
+		else
+			is_busy = TRUE;
+
+		if (is_busy)
+			g_usleep(SLEEP_PERIOD_US);
+	}
 
 	va_start(args, cmd);
 	vsnprintf(buf, sizeof(buf) - 3, cmd, args);
@@ -64,35 +80,51 @@ SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd
 SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	gboolean return_value;
+	gboolean return_value, inner_success;
 	devc = (struct dev_context *) sdi->priv;
 	const uint64_t *vscale_raw;
 	float vscale;
 
 	vscale_raw = volts_per_div[devc->cur_volts_per_div_index[0]];
 	vscale = vscale_raw[0]/((float) vscale_raw[1]);
-	return_value = TRUE;
+	return_value = SR_OK;
 	// First channel on the scope is 1 not 0.
-	for (int i = 1; i < devc->profile->nb_channels+1; i++)
-		return_value &= tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE, i, i, vscale,
+	for (int i = 1; i < devc->profile->nb_channels+1; i++){
+		inner_success = tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE, i, i, vscale,
 							i, timebase_for_samplerate(devc->cur_samplerate));
-	return SR_OK ? return_value : SR_ERR;
+		if (inner_success != SR_OK)
+			sr_err("Received error %d when configuring scope channel CH%d", inner_success, i+1);
+
+		return_value |= inner_success;
+	}
+	sr_info("config_inner: %d", return_value);
+	return return_value == SR_OK ? SR_OK : SR_ERR;
 }
 
 SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi)
 {
-	return tektronix_tds220_send(sdi, ACQ_COMMAND);
+	int ret;
+	ret = tektronix_tds220_send(sdi, ACQ_COMMAND);
+	if (ret != SR_OK)
+		sr_err("Received error when sending acquisition command.");
+
+	return ret;
 }
 
 SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
+	int ret;
 
 	devc = (struct dev_context *) sdi->priv;
 	devc->limits.samples_read = 0;
 	// First channel on the scope is 1 not 0.
 	sr_spew("Beginning collection on channel %d of %d", devc->cur_channel->index+1, devc->profile->nb_channels);
-	return tektronix_tds220_send(sdi, CHANNEL_COLLECT_TEMPLATE, devc->cur_channel->index+1);
+	ret = tektronix_tds220_send(sdi, CHANNEL_COLLECT_TEMPLATE, devc->cur_channel->index+1);
+	if (ret != SR_OK)
+		sr_err("Received error when collecting data.");
+
+	return ret;
 }
 
 SR_PRIV void tektronix_tds220_prepare_next_channel(const struct sr_dev_inst *sdi)
