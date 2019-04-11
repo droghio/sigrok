@@ -70,6 +70,8 @@ static const char *data_sources[] = {
 	"LIVE"
 };
 
+// Sub-versions of each scope are treated as the initial version
+// i.e. the TDS2024C is seen as a TDS2024 based on a strncmp.
 static const struct tektronix_tds220_profile supported_teks[] = {
 	{ TEK_TDS210, "TDS 210", 2 },
 	{ TEK_TDS220, "TDS 220", 2 },
@@ -102,42 +104,33 @@ static struct sr_dev_inst *probe_device(struct sr_scpi_dev_inst *scpi)
 {
 	struct sr_dev_inst *sdi;
 	struct dev_context *devc;
-	int len, i, j;
-	char *buf, **tokens;
+	int i, j, ret;
 	struct sr_channel *ch;
 	struct sr_channel_group *cg;
+	struct sr_scpi_hw_info *hw_info;
 
+	sdi = NULL;
 	sr_spew("Probing scope...");
 	if (sr_scpi_open(scpi) != SR_OK)
 		return NULL;
 
-	len = 128;
-	buf = (char *) g_malloc(len);
 
-	if (sr_scpi_get_string(scpi, "*IDN?\r\n", &buf) == SR_ERR) {
-		sr_err("Unable to send identification string.");
+	ret = sr_scpi_get_hw_id(scpi, &hw_info);
+	if (ret != SR_OK){
+		sr_err("Unable to get identification string, error: %d", ret);
 		return NULL;
 	}
 
-	len = strlen(buf);
-	if (len == 0)
-	{
-		sr_err("Unable to get identification string. Recieved %d bytes in buffer: %s", len, buf);
-		return NULL;
-	}
-
-	tokens = g_strsplit(buf, ",", 4);
-	if (!strcmp("TEKTRONIX", tokens[0])
-			&& tokens[1] && tokens[2] && tokens[3]) {
+	if (!strcmp("TEKTRONIX", hw_info->manufacturer)){
 		for (i = 0; supported_teks[i].model; i++) {
-			if (strcmp(supported_teks[i].modelname, tokens[1]))
+			if (strncmp(supported_teks[i].modelname, hw_info->model, strlen(supported_teks[i].modelname)))
 				continue;
-			sr_spew("Scope found '%s'.", buf);
+			sr_spew("Scope found '%s' serial: %s.", hw_info->model, hw_info->serial_number);
 			sdi = (struct sr_dev_inst *) g_malloc0(sizeof(struct sr_dev_inst));
 			sdi->status = SR_ST_INACTIVE;
-			sdi->vendor = g_strdup(tokens[0]);
-			sdi->model = g_strdup(tokens[1]);
-			sdi->version = g_strdup(tokens[3]);
+			sdi->vendor = g_strdup(hw_info->manufacturer);
+			sdi->model = g_strdup(hw_info->model);
+			sdi->version = g_strdup(hw_info->firmware_version);
 			sdi->driver = &tektronix_tds220_driver_info;
 			devc = (struct dev_context *) g_malloc0(sizeof(struct dev_context));
 			sr_sw_limits_init(&devc->limits);
@@ -158,8 +151,8 @@ static struct sr_dev_inst *probe_device(struct sr_scpi_dev_inst *scpi)
 			break;
 		}
 	}
-	g_strfreev(tokens);
-	g_free(buf);
+
+	sr_scpi_hw_info_free(hw_info);
 
 	return sdi;
 }
