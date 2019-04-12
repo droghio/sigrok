@@ -120,7 +120,11 @@ SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi)
 	devc->limits.samples_read = 0;
 	// First channel on the scope is 1 not 0.
 	sr_spew("Beginning collection on channel %d of %d", devc->cur_channel->index+1, devc->profile->nb_channels);
-	ret = tektronix_tds220_send(sdi, CHANNEL_COLLECT_TEMPLATE, devc->cur_channel->index+1);
+	ret = tektronix_tds220_send(sdi, "DAT:SOU CH%d\n", devc->cur_channel->index+1);
+	if (ret != SR_OK)
+		sr_err("Received error when selecting channel for data collection.");
+
+	ret |= tektronix_tds220_send(sdi, "CURV?\n", devc->cur_channel->index+1);
 	if (ret != SR_OK)
 		sr_err("Received error when collecting data.");
 
