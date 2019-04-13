@@ -45,23 +45,13 @@ SR_PRIV int tektronix_tds220_send(const struct sr_dev_inst *sdi, const char *cmd
 	struct sr_scpi_dev_inst *scpi;
 	va_list args;
 	char buf[256];
-	char *is_busy_resp;
-	gboolean is_busy;
 
 	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
 
-	is_busy = TRUE;
-	while (is_busy){
-		sr_spew("Checking if scope is busy...");
-		if (sr_scpi_get_string(scpi, BUSY_COMMAND, &is_busy_resp) == SR_OK){
-			is_busy = (is_busy_resp[0] == '1');
-			g_free((gpointer) is_busy_resp);
-		}
-		else
-			is_busy = TRUE;
-
-		if (is_busy)
-			g_usleep(SLEEP_PERIOD_US);
+	sr_spew("Checking if scope is busy...");
+	if (sr_scpi_get_opc(scpi) != SR_OK){
+		sr_err("Unable to get opc status from scope.");
+		return SR_ERR;
 	}
 
 	va_start(args, cmd);

@@ -63,7 +63,7 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 //
 #define TEK_BUFSIZE	16384	// Three digits and 1 Comma for 2500 Samples
 #define SLEEP_PERIOD_US 10000
-#define TIMEOUT_MS	500
+#define TIMEOUT_MS	1000
 
 //
 // Command templates
@@ -78,8 +78,6 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 					"CH%d:SCA %3.1e\n"	\
 					"SEL:CH%d ON\n"		\
 					"HOR:SCA %5.2e\n"
-
-#define BUSY_COMMAND			"BUSY?\n"
 
 //
 // Utility functions
