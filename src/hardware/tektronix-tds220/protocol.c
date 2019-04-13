@@ -80,10 +80,21 @@ SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 	return_value = SR_OK;
 	// First channel on the scope is 1 not 0.
 	for (int i = 1; i < devc->profile->nb_channels+1; i++){
-		inner_success = tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE, i, i, vscale,
-							i, timebase_for_samplerate(devc->cur_samplerate));
+		inner_success = tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE0, i);
 		if (inner_success != SR_OK)
-			sr_err("Received error %d when configuring scope channel CH%d", inner_success, i+1);
+			sr_err("Received error %d when configuring 0 scope channel CH%d", inner_success, i+1);
+
+		inner_success = tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE1, i, vscale);
+		if (inner_success != SR_OK)
+			sr_err("Received error %d when configuring 1 scope channel CH%d", inner_success, i+1);
+
+		inner_success = tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE2, i);
+		if (inner_success != SR_OK)
+			sr_err("Received error %d when configuring 2 scope channel CH%d", inner_success, i+1);
+
+		inner_success |= tektronix_tds220_send(sdi, CHANNEL_CONFIGURE_TEMPLATE3, timebase_for_samplerate(devc->cur_samplerate));
+		if (inner_success != SR_OK)
+			sr_err("Received error %d when configuring 3 scope channel CH%d", inner_success, i+1);
 
 		return_value |= inner_success;
 	}

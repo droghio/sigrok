@@ -74,10 +74,10 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 #define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"	\
 					"CURV?\n"
 
-#define CHANNEL_CONFIGURE_TEMPLATE	"CH%d:POS 0\n"		\
-					"CH%d:SCA %3.1e\n"	\
-					"SEL:CH%d ON\n"		\
-					"HOR:SCA %5.2e\n"
+#define CHANNEL_CONFIGURE_TEMPLATE0	"CH%d:POS 0\n"
+#define CHANNEL_CONFIGURE_TEMPLATE1     "CH%d:SCA %3.1e\n"
+#define CHANNEL_CONFIGURE_TEMPLATE2	"SEL:CH%d ON\n"
+#define CHANNEL_CONFIGURE_TEMPLATE3	"HOR:SCA %5.2e\n"
 
 //
 // Utility functions
