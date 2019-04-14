@@ -158,6 +158,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 
 	(void)fd;
 
+	sr_spew("In receive data.");
 	if (!(sdi = (struct sr_dev_inst *) cb_data))
 		return TRUE;
 
@@ -165,7 +166,7 @@ SR_PRIV int tektronix_tds220_receive_data(int fd, int revents, void *cb_data)
 		return TRUE;
 
 	scpi = (struct sr_scpi_dev_inst *) sdi->conn;
-	if (revents == G_IO_IN) {
+	if (revents == G_IO_IN || revents == 0) {
 		sr_spew("Receiving data.");
 		// Serial data arrived.
 		while (TEK_BUFSIZE - devc->buflen - 1 > 0) {
