@@ -105,7 +105,11 @@ SR_PRIV int tektronix_tds220_configure_scope(const struct sr_dev_inst *sdi)
 SR_PRIV int tektronix_tds220_start_acquisition(const struct sr_dev_inst *sdi)
 {
 	int ret;
-	ret = tektronix_tds220_send(sdi, ACQ_COMMAND);
+	ret = tektronix_tds220_send(sdi, ACQ_SETUP);
+	if (ret != SR_OK)
+		sr_err("Received error when setting up acquisition.");
+
+	ret |= tektronix_tds220_send(sdi, ACQ_COMMAND);
 	if (ret != SR_OK)
 		sr_err("Received error when sending acquisition command.");
 
@@ -121,11 +125,11 @@ SR_PRIV int tektronix_tds220_start_collection(const struct sr_dev_inst *sdi)
 	devc->limits.samples_read = 0;
 	// First channel on the scope is 1 not 0.
 	sr_spew("Beginning collection on channel %d of %d", devc->cur_channel->index+1, devc->profile->nb_channels);
-	ret = tektronix_tds220_send(sdi, "DAT:SOU CH%d\n", devc->cur_channel->index+1);
+	ret = tektronix_tds220_send(sdi, CHANNEL_COLLECT_TEMPLATE, devc->cur_channel->index+1);
 	if (ret != SR_OK)
 		sr_err("Received error when selecting channel for data collection.");
 
-	ret |= tektronix_tds220_send(sdi, "CURV?\n", devc->cur_channel->index+1);
+	ret |= tektronix_tds220_send(sdi, CHANNEL_COLLECT_COMMAND, devc->cur_channel->index+1);
 	if (ret != SR_OK)
 		sr_err("Received error when collecting data.");
 

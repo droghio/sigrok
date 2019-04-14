@@ -63,19 +63,20 @@ SR_PRIV uint64_t tektronix_tds220_parse_curve(char data[], float processed[], ui
 //
 #define TEK_BUFSIZE	16384	// Three digits and 1 Comma for 2500 Samples
 #define SLEEP_PERIOD_US 10000
-#define TIMEOUT_MS	1000
+#define TIMEOUT_MS	0
 
 //
 // Command templates
 //
-#define ACQ_COMMAND			"ACQ:STATE RUN\n"	\
-					"ACQ:STOPA SEQ\n"
 
-#define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"	\
-					"CURV?\n"
+#define ACQ_SETUP			"ACQ:STOPA SEQ\n"
+#define ACQ_COMMAND			"ACQ:STATE RUN\n"
+
+#define CHANNEL_COLLECT_TEMPLATE	"DAT:SOU CH%d\n"
+#define CHANNEL_COLLECT_COMMAND		"CURV?\n"
 
 #define CHANNEL_CONFIGURE_TEMPLATE0	"CH%d:POS 0\n"
-#define CHANNEL_CONFIGURE_TEMPLATE1     "CH%d:SCA %3.1e\n"
+#define CHANNEL_CONFIGURE_TEMPLATE1	"CH%d:SCA %3.1e\n"
 #define CHANNEL_CONFIGURE_TEMPLATE2	"SEL:CH%d ON\n"
 #define CHANNEL_CONFIGURE_TEMPLATE3	"HOR:SCA %5.2e\n"
 
